@@ -18,6 +18,9 @@ $scanText = Get-Content -LiteralPath (Join-Path $root 'scripts\scan-drive.ps1') 
 if ($scanText -match 'New-Item\s+[^\r\n]*-LiteralPath') {
   throw 'New-Item -LiteralPath is incompatible with Windows PowerShell 5.1.'
 }
+if ($scanText -notmatch '\[ValidateRange\(0,2147483647\)\]\[int\]\$MaxCandidates') {
+  throw 'MaxCandidates must accept 0 for unlimited output.'
+}
 $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (Test-Path -LiteralPath $ps51) {
   $audit = Join-Path $env:TEMP ('wdc-validate-' + [Guid]::NewGuid().ToString('N'))

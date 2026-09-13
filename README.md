@@ -91,7 +91,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\scan-drive.ps1 `
 - `UserFileMinimumAgeDays`：个人大文件最小未修改天数，默认 30 天。
 - `MoveMinimumBytes`：移动候选的最小体积，默认 256 MiB。
 - `SkipUserContentScan`：只检查低风险临时目录，跳过个人大文件扫描，可用于快速测试。
-- `MaxCandidates`：完整枚举后按文件大小降序保留的候选数量，默认 5000；超过时报告会给出符合条件总数和输出截断状态。
+- `MaxCandidates`：扫描过程中保留的最大候选数量，默认 5000，并始终保留体积最大的文件；设为 `0` 可返回全部候选，但会增加内存和报告体积。
 - `MaxScanSeconds`：最长扫描时间，默认 300 秒；超时表示磁盘尚未扫描完整，并会与输出数量截断分别标记。
 - `AdditionalCloudRoot`：补充自定义云同步根目录，可重复传入。
 
