@@ -6,12 +6,19 @@ param(
   [int]$UserFileMinimumAgeDays = 30,
   [long]$MoveMinimumBytes = 268435456,
   [switch]$SkipUserContentScan,
+  [switch]$AllCandidates,
   [ValidateRange(0,2147483647)][int]$MaxCandidates = 5000,
   [ValidateRange(10,86400)][int]$MaxScanSeconds = 300,
   [string[]]$AdditionalCloudRoot = @()
 )
 
 $ErrorActionPreference = 'Stop'
+if ($AllCandidates) {
+  $TempMinimumAgeDays = 0
+  $UserFileMinimumAgeDays = 0
+  $MoveMinimumBytes = 0
+  $MaxCandidates = 0
+}
 $driveFull = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($DriveRoot))
 $outputFull = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $outputFull | Out-Null
@@ -153,7 +160,7 @@ $jsonPath = Join-Path $outputFull 'drive-candidates.json'
 $csvPath = Join-Path $outputFull 'drive-candidates.csv'
 $mdPath = Join-Path $outputFull 'drive-report.md'
 $driveInfo = [IO.DriveInfo]::new($driveFull)
-[pscustomobject]@{schemaVersion=3;hashPolicy='deferred-until-approved-execution';targetRoot=$driveFull;scannedAtUtc=(Get-Date).ToUniversalTime().ToString('o');computer=$env:COMPUTERNAME;user=$env:USERNAME;freeBytesBefore=$driveInfo.AvailableFreeSpace;limitReached=$limitReached;timeLimitReached=$timeLimitReached;outputTruncated=$outputTruncated;eligibleCount=$eligibleCount;returnedCount=$sorted.Count;maxCandidates=$MaxCandidates;maxScanSeconds=$MaxScanSeconds;cloudRoots=@($cloudRoots);candidates=$sorted} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+[pscustomobject]@{schemaVersion=3;hashPolicy='deferred-until-approved-execution';targetRoot=$driveFull;scannedAtUtc=(Get-Date).ToUniversalTime().ToString('o');computer=$env:COMPUTERNAME;user=$env:USERNAME;freeBytesBefore=$driveInfo.AvailableFreeSpace;allCandidates=[bool]$AllCandidates;tempMinimumAgeDays=$TempMinimumAgeDays;userFileMinimumAgeDays=$UserFileMinimumAgeDays;moveMinimumBytes=$MoveMinimumBytes;limitReached=$limitReached;timeLimitReached=$timeLimitReached;outputTruncated=$outputTruncated;eligibleCount=$eligibleCount;returnedCount=$sorted.Count;maxCandidates=$MaxCandidates;maxScanSeconds=$MaxScanSeconds;cloudRoots=@($cloudRoots);candidates=$sorted} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
 $csvColumns=@('id','action','path','bytes','lastWriteUtc','sha256','reason','risk')
 if ($sorted.Count) { $sorted | Select-Object $csvColumns | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8 }
 else { ('"'+($csvColumns -join '","')+'"') | Set-Content -LiteralPath $csvPath -Encoding UTF8 }
@@ -168,4 +175,4 @@ $lines += ''; $lines += ('Total candidates: {0}; potential bytes: {1}' -f $sorte
 if ($outputTruncated) { $lines += ('Output truncated after sorting by size: showing the largest {0} of {1} eligible candidates. Increase MaxCandidates to return more.' -f $sorted.Count,$eligibleCount) }
 if ($timeLimitReached) { $lines += 'Time limit reached; the filesystem scan is incomplete. Increase MaxScanSeconds for a deeper scan.' }
 $lines | Set-Content -LiteralPath $mdPath -Encoding UTF8
-[pscustomobject]@{Json=$jsonPath;Csv=$csvPath;Markdown=$mdPath;Count=$sorted.Count;EligibleCount=$eligibleCount;PotentialBytes=$sum;LimitReached=$limitReached;TimeLimitReached=$timeLimitReached;OutputTruncated=$outputTruncated;ScanSeconds=[Math]::Round($timer.Elapsed.TotalSeconds,2)}
+[pscustomobject]@{Json=$jsonPath;Csv=$csvPath;Markdown=$mdPath;AllCandidates=[bool]$AllCandidates;Count=$sorted.Count;EligibleCount=$eligibleCount;PotentialBytes=$sum;LimitReached=$limitReached;TimeLimitReached=$timeLimitReached;OutputTruncated=$outputTruncated;ScanSeconds=[Math]::Round($timer.Elapsed.TotalSeconds,2)}

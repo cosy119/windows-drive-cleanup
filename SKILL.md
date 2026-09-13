@@ -55,6 +55,12 @@ Read-only scan:
 powershell -ExecutionPolicy Bypass -File scripts/scan-drive.ps1 -DriveRoot C:\ -OutputDirectory .\drive-audit
 ```
 
+Read-only scan of all eligible candidates, without age, size, or candidate-count limits:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/scan-drive.ps1 -DriveRoot C:\ -OutputDirectory .\drive-audit -AllCandidates
+```
+
 Read-only whole-drive classification:
 
 ```powershell
