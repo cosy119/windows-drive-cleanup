@@ -11,7 +11,7 @@
 - 找出体积较大的个人文档、图片、音视频、压缩包和安装包，标记为人工确认的移动候选。
 - 自动排除 Windows、Program Files、ProgramData、恢复目录、应用数据、浏览器资料、代码仓库、数据库、密钥、云端占位文件和重解析点等高风险内容。
 - 为每个候选文件记录完整路径、大小、修改时间、原因和唯一编号；仅在批准移动后计算 SHA-256。
-- 执行前再次核对文件大小、时间和哈希；扫描后发生变化的文件会被跳过。
+- 执行前再次核对文件大小和修改时间；移动时校验复制前后的 SHA-256，扫描后发生变化的文件会被跳过。
 - 移动操作使用另一磁盘上的日期隔离目录，不覆盖已有文件。
 - 删除默认进入 Windows 回收站，不提供静默永久删除。
 
@@ -82,6 +82,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\scan-drive.ps1 `
 - `TempMinimumAgeDays`：临时文件最小保留天数，默认 14 天。
 - `UserFileMinimumAgeDays`：个人大文件最小未修改天数，默认 30 天。
 - `MoveMinimumBytes`：移动候选的最小体积，默认 256 MiB。
+- `SkipUserContentScan`：只检查低风险临时目录，跳过个人大文件扫描，可用于快速测试。
 
 扫描会生成：
 
@@ -111,7 +112,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\apply-approved.ps1 `
   -ConfirmToken CONFIRM
 ```
 
-`move-review` 文件会保留原目录结构并移动到隔离目录。`delete-low-risk` 文件会进入回收站。隔离目录中的 `drive-operation-*.json` 保存执行记录，可以根据 `path` 和 `destination` 字段手动恢复文件。
+`move-review` 文件会保留原目录结构并移动到隔离目录。程序先复制文件并校验源文件和目标文件的 SHA-256，校验成功后才删除源文件。`delete-low-risk` 文件会进入回收站。每次预览或执行都会在清单目录生成 `drive-operation-*.json`，可以根据 `path` 和 `destination` 字段核对或手动恢复文件。
 
 ## 安全说明
 

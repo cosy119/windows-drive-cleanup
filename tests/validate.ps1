@@ -27,6 +27,19 @@ if (Test-Path -LiteralPath $ps51) {
     if (Test-Path -LiteralPath $audit) { Remove-Item -LiteralPath $audit -Recurse -Force }
   }
 }
+$tamperDir = Join-Path $env:TEMP ('wdc-tamper-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $tamperDir | Out-Null
+try {
+  $protected = Get-Item -LiteralPath (Join-Path $root 'SKILL.md')
+  $manifest = Join-Path $tamperDir 'manifest.json'
+  $result = Join-Path $tamperDir 'result.json'
+  [pscustomobject]@{schemaVersion=2;targetRoot=[IO.Path]::GetPathRoot($protected.FullName);candidates=@([pscustomobject]@{id='D0001';action='delete-low-risk';path=$protected.FullName;bytes=[long]$protected.Length;lastWriteUtc=$protected.LastWriteTimeUtc.ToString('o')})} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifest -Encoding UTF8
+  & $ps51 -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\apply-approved.ps1') -Manifest $manifest -Ids D0001 -ResultPath $result | Out-Null
+  $check = Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
+  if ($check.status -ne 'skipped' -or $check.message -notmatch 'classification') { throw 'Tampered-manifest test failed.' }
+} finally {
+  if (Test-Path -LiteralPath $tamperDir) { Remove-Item -LiteralPath $tamperDir -Recurse -Force }
+}
 $skill = Get-Content -LiteralPath (Join-Path $root 'SKILL.md') -Raw
 if ($skill -notmatch '(?s)^---\s+name: windows-drive-cleanup\s+description:') { throw 'Invalid SKILL.md frontmatter.' }
 if ($skill -match '\[TODO') { throw 'Unfinished placeholder found.' }

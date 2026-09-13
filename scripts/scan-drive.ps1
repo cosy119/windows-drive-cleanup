@@ -22,6 +22,12 @@ function Test-Readable([string]$Path) {
   try { $stream = [IO.File]::Open($Path,'Open','Read','None'); $stream.Dispose(); return $true } catch { return $false }
 }
 
+function Test-UnderRoot([string]$Path,[string]$Root) {
+  $full=[IO.Path]::GetFullPath($Path)
+  $base=[IO.Path]::GetFullPath($Root).TrimEnd('\')+'\'
+  return $full.StartsWith($base,[StringComparison]::OrdinalIgnoreCase)
+}
+
 function Add-Candidate([IO.FileInfo]$File,[string]$Action,[string]$Reason) {
   $blocked = [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::Offline -bor [IO.FileAttributes]::Encrypted -bor [IO.FileAttributes]::SparseFile
   if (($File.Attributes -band $blocked) -ne 0 -or -not (Test-Readable $File.FullName)) { return }
@@ -64,6 +70,7 @@ $knownFolders = [ordered]@{
   Pictures = [Environment]::GetFolderPath('MyPictures')
 }
 $allowedExt = @('.zip','.7z','.rar','.tar','.gz','.iso','.img','.mp4','.mkv','.mov','.avi','.webm','.mp3','.wav','.flac','.jpg','.jpeg','.png','.gif','.webp','.tif','.tiff','.pdf','.doc','.docx','.ppt','.pptx','.xls','.xlsx','.exe','.msi')
+$cloudRoots = @($env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
 $userCutoff = $now.AddDays(-$UserFileMinimumAgeDays)
 if (-not $SkipUserContentScan) { foreach ($entry in $knownFolders.GetEnumerator()) {
   $name = $entry.Key
@@ -71,7 +78,9 @@ if (-not $SkipUserContentScan) { foreach ($entry in $knownFolders.GetEnumerator(
   if (-not (Test-Path -LiteralPath $root -PathType Container) -or [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($root)) -ne $driveFull) { continue }
   Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
     $badAttributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Offline
-    if ($_.Length -ge $MoveMinimumBytes -and $_.LastWriteTime -lt $userCutoff -and $allowedExt -contains $_.Extension.ToLowerInvariant() -and ($_.Attributes -band $badAttributes) -eq 0 -and $_.FullName -notmatch '[\\/]\.git[\\/]') {
+    $inCloud=$false
+    foreach($cloudRoot in $cloudRoots) { if (Test-UnderRoot $_.FullName $cloudRoot) { $inCloud=$true; break } }
+    if (-not $inCloud -and $_.Length -ge $MoveMinimumBytes -and $_.LastWriteTime -lt $userCutoff -and $allowedExt -contains $_.Extension.ToLowerInvariant() -and ($_.Attributes -band $badAttributes) -eq 0 -and $_.FullName -notmatch '[\\/]\.git[\\/]') {
       Add-Candidate $_ 'move-review' ('Large user file in ' + $name)
     }
   }
@@ -81,7 +90,9 @@ if (-not $SkipUserContentScan -and $driveFull -ne 'C:\') {
   $excludedPattern = '[\\/](Windows|Program Files|Program Files \(x86\)|ProgramData|Recovery|System Volume Information|\$Recycle\.Bin|AppData|node_modules|\.git)([\\/]|$)'
   Get-ChildItem -LiteralPath $driveFull -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
     $badAttributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Offline
-    if ($_.Length -ge $MoveMinimumBytes -and $_.LastWriteTime -lt $userCutoff -and $allowedExt -contains $_.Extension.ToLowerInvariant() -and ($_.Attributes -band $badAttributes) -eq 0 -and $_.FullName -notmatch $excludedPattern) {
+    $inCloud=$false
+    foreach($cloudRoot in $cloudRoots) { if (Test-UnderRoot $_.FullName $cloudRoot) { $inCloud=$true; break } }
+    if (-not $inCloud -and $_.Length -ge $MoveMinimumBytes -and $_.LastWriteTime -lt $userCutoff -and $allowedExt -contains $_.Extension.ToLowerInvariant() -and ($_.Attributes -band $badAttributes) -eq 0 -and $_.FullName -notmatch $excludedPattern) {
       Add-Candidate $_ 'move-review' 'Large user-content file on selected non-system drive'
     }
   }
