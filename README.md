@@ -35,6 +35,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-skill.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\install-skill.ps1 -DestinationRoot "D:\Codex\skills"
 ```
 
+安装到 WorkBuddy 的自动发现目录：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-skill.ps1 -Platform WorkBuddy
+```
+
+这会安装到 `%USERPROFILE%\.workbuddy\skills\windows-drive-cleanup`。仅把仓库放在 `D:\skills\WorkBuddy` 不会被 WorkBuddy 自动发现。
+
 安装完成后重新打开 Codex 会话。
 
 ## 在 Codex 对话中使用
@@ -83,6 +91,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\scan-drive.ps1 `
 - `UserFileMinimumAgeDays`：个人大文件最小未修改天数，默认 30 天。
 - `MoveMinimumBytes`：移动候选的最小体积，默认 256 MiB。
 - `SkipUserContentScan`：只检查低风险临时目录，跳过个人大文件扫描，可用于快速测试。
+- `MaxCandidates`：最多输出的候选数量，默认 5000。
+- `MaxScanSeconds`：最长扫描时间，默认 300 秒；达到任一上限时报告会标记为不完整。
+- `AdditionalCloudRoot`：补充自定义云同步根目录，可重复传入。
 
 扫描会生成：
 
@@ -97,7 +108,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\scan-drive.ps1 `
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\apply-approved.ps1 `
   -Manifest .\drive-audit\drive-candidates.json `
-  -Ids D0001,M0003 `
+  -Ids "D0001, M0003" `
   -MoveRoot E:\Drive-quarantine
 ```
 
@@ -106,13 +117,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\apply-approved.ps1 `
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\apply-approved.ps1 `
   -Manifest .\drive-audit\drive-candidates.json `
-  -Ids D0001,M0003 `
+  -Ids "D0001, M0003" `
   -MoveRoot E:\Drive-quarantine `
   -Execute `
   -ConfirmToken CONFIRM
 ```
 
-`move-review` 文件会保留原目录结构并移动到隔离目录。程序先复制文件并校验源文件和目标文件的 SHA-256，校验成功后才删除源文件。`delete-low-risk` 文件会进入回收站。每次预览或执行都会在清单目录生成 `drive-operation-*.json`，可以根据 `path` 和 `destination` 字段核对或手动恢复文件。
+`move-review` 文件会保留原目录结构并移动到隔离目录。程序先复制文件并校验源文件和目标文件的 SHA-256，校验成功后使用 `Remove-Item` 永久移除原路径；这一步不进入回收站，但隔离目录保留已校验副本。`delete-low-risk` 文件会进入回收站。每次预览或执行都会在清单目录生成名称唯一的 `drive-operation-*.json`，可以根据 `path` 和 `destination` 字段核对或手动恢复文件。
 
 ## 安全说明
 

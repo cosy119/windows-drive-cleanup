@@ -23,6 +23,10 @@ if (Test-Path -LiteralPath $ps51) {
   try {
     & $ps51 -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\scan-drive.ps1') -DriveRoot $testDrive -OutputDirectory $audit -SkipUserContentScan | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 scan smoke test failed.' }
+    $csvHeader = Get-Content -LiteralPath (Join-Path $audit 'drive-candidates.csv') -TotalCount 1
+    if ($csvHeader -ne '"id","action","path","bytes","lastWriteUtc","sha256","reason","risk"') { throw 'Empty CSV header test failed.' }
+    $reportHeader = Get-Content -LiteralPath (Join-Path $audit 'drive-report.md') -TotalCount 1
+    if ($reportHeader -ne "# Windows drive audit: $testDrive") { throw 'Markdown report header test failed.' }
   } finally {
     if (Test-Path -LiteralPath $audit) { Remove-Item -LiteralPath $audit -Recurse -Force }
   }

@@ -20,7 +20,7 @@ function Test-UnderRoot([string]$Path,[string]$Root) {
 
 function Test-ApprovedClassification([IO.FileInfo]$File,[string]$Action,[string]$TargetRoot) {
   $tempRoots=@(
-    [Environment]::GetEnvironmentVariable('TEMP','User'),'C:\Windows\Temp',
+    (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'),'C:\Windows\Temp',
     (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\WER\ReportArchive'),
     (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\WER\ReportQueue'),
     (Join-Path $env:LOCALAPPDATA 'CrashDumps')
@@ -32,7 +32,13 @@ function Test-ApprovedClassification([IO.FileInfo]$File,[string]$Action,[string]
   if ($Action -ne 'move-review') { return $false }
   $allowedExt=@('.zip','.7z','.rar','.tar','.gz','.iso','.img','.mp4','.mkv','.mov','.avi','.webm','.mp3','.wav','.flac','.jpg','.jpeg','.png','.gif','.webp','.tif','.tiff','.pdf','.doc','.docx','.ppt','.pptx','.xls','.xlsx','.exe','.msi')
   if ($allowedExt -notcontains $File.Extension.ToLowerInvariant()) { return $false }
-  $cloudRoots=@($env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial) | Where-Object { $_ } | Select-Object -Unique
+  $cloudRoots=@(
+    $env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial,
+    (Join-Path $env:USERPROFILE 'Dropbox'),(Join-Path $env:USERPROFILE 'Google Drive'),
+    (Join-Path $env:USERPROFILE 'GoogleDrive'),(Join-Path $env:USERPROFILE 'iCloudDrive'),
+    (Join-Path $env:USERPROFILE 'Box'),(Join-Path $env:USERPROFILE 'Nutstore'),
+    (Join-Path $env:USERPROFILE '坚果云'),$data.cloudRoots
+  ) | Where-Object { $_ } | Select-Object -Unique
   foreach($root in $cloudRoots) { if (Test-UnderRoot $File.FullName $root) { return $false } }
   if ($TargetRoot -eq 'C:\') {
     $known=@((Join-Path $env:USERPROFILE 'Downloads'),[Environment]::GetFolderPath('MyDocuments'),[Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('MyVideos'),[Environment]::GetFolderPath('MyMusic'),[Environment]::GetFolderPath('MyPictures')) | Where-Object { $_ } | Select-Object -Unique
@@ -45,8 +51,10 @@ function Test-ApprovedClassification([IO.FileInfo]$File,[string]$Action,[string]
 
 $data=Get-Content -LiteralPath $Manifest -Raw | ConvertFrom-Json
 $targetRoot=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath([string]$data.targetRoot))
-$approved=@($data.candidates | Where-Object { $Ids -contains $_.id })
-if ($approved.Count -ne $Ids.Count) { throw 'One or more IDs are absent or duplicated in the manifest.' }
+$normalizedIds=@($Ids | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($normalizedIds.Count -ne @($normalizedIds | Select-Object -Unique).Count) { throw 'Duplicate IDs were supplied.' }
+$approved=@($data.candidates | Where-Object { $normalizedIds -contains $_.id })
+if ($approved.Count -ne $normalizedIds.Count) { throw 'One or more IDs are absent or duplicated in the manifest.' }
 if ($Execute -and $ConfirmToken -cne 'CONFIRM') { throw 'Execution requires -ConfirmToken CONFIRM.' }
 if ($approved.action -contains 'move-review' -and [string]::IsNullOrWhiteSpace($MoveRoot)) { throw 'MoveRoot is required for move-review items.' }
 if ($MoveRoot) {
@@ -54,7 +62,7 @@ if ($MoveRoot) {
   if ([IO.Path]::GetPathRoot($moveFull) -eq $targetRoot) { throw 'MoveRoot must be on a different volume from the scanned drive.' }
 }
 Add-Type -AssemblyName Microsoft.VisualBasic
-$stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
+$stamp=(Get-Date -Format 'yyyyMMdd-HHmmss-fff')+'-'+[Guid]::NewGuid().ToString('N').Substring(0,8)
 $results=[Collections.Generic.List[object]]::new()
 foreach($item in $approved){
   $status='preview'; $destination=$null; $message='No change made.'; $copyStarted=$false

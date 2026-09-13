@@ -1,10 +1,14 @@
 [CmdletBinding()]
-param([string]$DestinationRoot)
+param(
+  [string]$DestinationRoot,
+  [ValidateSet('Codex','WorkBuddy')][string]$Platform = 'Codex'
+)
 
 $ErrorActionPreference = 'Stop'
 $skillRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($DestinationRoot)) {
-  $DestinationRoot = if ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME 'skills' } else { Join-Path $env:USERPROFILE '.codex\skills' }
+  if ($Platform -eq 'WorkBuddy') { $DestinationRoot=Join-Path $env:USERPROFILE '.workbuddy\skills' }
+  else { $DestinationRoot = if ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME 'skills' } else { Join-Path $env:USERPROFILE '.codex\skills' } }
 }
 $destination = Join-Path ([IO.Path]::GetFullPath($DestinationRoot)) 'windows-drive-cleanup'
 $sourceFull = [IO.Path]::GetFullPath($skillRoot).TrimEnd('\') + '\'

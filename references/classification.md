@@ -12,7 +12,7 @@ Possible impact: loss of temporary recovery data, cached diagnostics, or unfinis
 
 Limit discovery to large regular user-content files beneath Downloads, Documents, Desktop, Videos, Music, and Pictures. Prefer video, audio, images, documents, archives, disk images, and downloaded installers. Exclude reparse points, `.git`, hidden/system files, cloud-sync roots, packages, databases, and application data.
 
-Moving a file can break shortcuts, recent-file entries, project references, media libraries, or application workflows. Require exact approval and use quarantine. Exclude files under resolved OneDrive roots even when they are locally hydrated.
+Moving a file can break shortcuts, recent-file entries, project references, media libraries, or application workflows. Require exact approval and use quarantine. Exclude files under recognized OneDrive, Dropbox, Google Drive, iCloud Drive, Box, Nutstore, and user-supplied cloud roots even when they are locally hydrated. Unknown providers must be supplied with `-AdditionalCloudRoot`.
 
 ## Always exclude
 

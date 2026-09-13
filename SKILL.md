@@ -19,12 +19,12 @@ Reduce usage on a selected local Windows drive without silently changing the sys
 
 ## Safety boundaries
 
-- Never move or delete from Windows, Program Files, Program Files (x86), ProgramData, Recovery, System Volume Information, boot folders, driver stores, component stores, installer caches, registry hives, or profile roots.
+- Never move or delete from Windows, Program Files, Program Files (x86), ProgramData, Recovery, System Volume Information, boot folders, driver stores, component stores, installer caches, registry hives, or profile roots. The only Windows-tree exception is an old regular file under the exact `C:\Windows\Temp` root, when it passes the low-risk checks and receives item-level approval.
 - Never touch executables used by installed applications, DLLs, drivers, services, scheduled-task payloads, package-manager stores, virtual disks, mail databases, browser profiles, credentials, keys, repositories, databases, or sync-managed files merely because they are old or large.
 - Do not use recursive deletion, wildcards for mutations, inferred targets, registry cleaners, ownership or ACL changes, service termination, or `takeown`.
 - Keep restore points, hibernation/page files, Windows Update data, and component-store cleanup outside this skill. These require documented system tools and separate intent.
 - Preserve any file changed after scanning. The executor verifies size and timestamp before acting. For a move, it copies the approved file, verifies source and destination SHA-256 values, and removes the source only after verification succeeds.
-- Move approved files into a dated quarantine folder on a different volume, preserve their relative paths, write a restoration map, and never overwrite.
+- Move approved files into a uniquely named quarantine folder on a different volume, preserve their relative paths, write a restoration map, and never overwrite. Moving is implemented as verified copy followed by permanent removal of the source path; the source removal does not use the Recycle Bin.
 - Send approved deletions to the Recycle Bin. Permanent deletion requires a separate, explicit request after exact-file review.
 - Finish the non-admin audit before considering elevation. Never elevate merely to produce more candidates.
 
@@ -39,11 +39,11 @@ powershell -ExecutionPolicy Bypass -File scripts/scan-drive.ps1 -DriveRoot C:\ -
 Preview exact approved IDs:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/apply-approved.ps1 -Manifest .\drive-audit\drive-candidates.json -Ids D0001,M0003 -MoveRoot D:\Drive-quarantine
+powershell -ExecutionPolicy Bypass -File scripts/apply-approved.ps1 -Manifest .\drive-audit\drive-candidates.json -Ids "D0001, M0003" -MoveRoot D:\Drive-quarantine
 ```
 
 Execute after approval:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/apply-approved.ps1 -Manifest .\drive-audit\drive-candidates.json -Ids D0001,M0003 -MoveRoot D:\Drive-quarantine -Execute -ConfirmToken CONFIRM
+powershell -ExecutionPolicy Bypass -File scripts/apply-approved.ps1 -Manifest .\drive-audit\drive-candidates.json -Ids "D0001, M0003" -MoveRoot D:\Drive-quarantine -Execute -ConfirmToken CONFIRM
 ```
