@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$required = @('SKILL.md','agents\openai.yaml','references\classification.md','scripts\scan-drive.ps1','scripts\apply-approved.ps1','scripts\install-skill.ps1')
+$required = @('SKILL.md','agents\openai.yaml','references\classification.md','scripts\scan-drive.ps1','scripts\apply-approved.ps1','scripts\install-skill.ps1','scripts\classify-drive.ps1')
 foreach ($relative in $required) {
   if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) { throw "Missing required file: $relative" }
 }
@@ -40,6 +40,25 @@ if (Test-Path -LiteralPath $ps51) {
     if ($reportHeader -ne "# Windows drive audit: $testDrive") { throw 'Markdown report header test failed.' }
   } finally {
     if (Test-Path -LiteralPath $audit) { Remove-Item -LiteralPath $audit -Recurse -Force }
+  }
+  $classifyOut = Join-Path $env:TEMP ('wdc-classify-' + [Guid]::NewGuid().ToString('N'))
+  try {
+    & $ps51 -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\classify-drive.ps1') -DriveRoot $testDrive -OutputDirectory $classifyOut -MaxScanSeconds 20 -SkipReferenceScan | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 classify smoke test failed.' }
+    $cjson = Get-Content -LiteralPath (Join-Path $classifyOut 'classify-summary.json') -Raw | ConvertFrom-Json
+    foreach ($b in @('safe-delete','regenerable','keep','safe-move','move-needs-repoint','cannot-move')) {
+      if (-not ($cjson.buckets | Where-Object { $_.bucket -eq $b })) { throw "Classification report is missing bucket: $b" }
+    }
+    $reported = 0L
+    foreach ($b in $cjson.buckets) { $reported += [long]$b.files }
+    if ($reported -ne [long]$cjson.totals.files) { throw 'Classification bucket counts do not sum to the reported total.' }
+    foreach ($b in $cjson.buckets) {
+      if ([long]$b.files -gt 0 -and @($b.topFiles).Count -eq 0) { throw "Largest-file samples were not collected for bucket: $($b.bucket)" }
+    }
+    $classifyText = Get-Content -LiteralPath (Join-Path $root 'scripts\classify-drive.ps1') -Raw
+    if ($classifyText -match 'New-Item\s+[^\r\n]*-LiteralPath') { throw 'New-Item -LiteralPath is incompatible with Windows PowerShell 5.1.' }
+  } finally {
+    if (Test-Path -LiteralPath $classifyOut) { Remove-Item -LiteralPath $classifyOut -Recurse -Force }
   }
 }
 $tamperDir = Join-Path $env:TEMP ('wdc-tamper-' + [Guid]::NewGuid().ToString('N'))

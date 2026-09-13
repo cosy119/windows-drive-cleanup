@@ -1,4 +1,5 @@
 drive-audit/
+classify-audit/
 *.tmp
 *.log
 .DS_Store

@@ -125,6 +125,45 @@ powershell -ExecutionPolicy Bypass -File .\scripts\apply-approved.ps1 `
 
 `move-review` 文件会保留原目录结构并移动到隔离目录。程序先复制文件并校验源文件和目标文件的 SHA-256，校验成功后使用 `Remove-Item` 永久移除原路径；这一步不进入回收站，但隔离目录保留已校验副本。`delete-low-risk` 文件会进入回收站。每次预览或执行都会在清单目录生成名称唯一的 `drive-operation-*.json`，可以根据 `path` 和 `destination` 字段核对或手动恢复文件。
 
+## 全盘分类盘点（只读）
+
+`scan-drive.ps1` 输出的是逐条候选清单；如果你想先看**整块磁盘的全貌**，用 `classify-drive.ps1`。它枚举**执行命令前已存在**的全部文件，聚合成 6 个互斥类别，报告只给汇总，不会列出几万行明细。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\classify-drive.ps1 `
+  -DriveRoot C:\ `
+  -OutputDirectory .\classify-audit
+```
+
+| 类别 | 含义 |
+|---|---|
+| `safe-delete` | 受认可的临时/诊断目录下的数据，当前已无用途 |
+| `regenerable` | 按需重建的缓存（包管理器、浏览器缓存、着色器缓存、Prefetch 等） |
+| `keep` | 受保护的系统位置、**尚未超过保留期**的临时/缓存文件，以及一切无法有把握归类的文件（保守兜底） |
+| `safe-move` | 超过移动阈值的用户大文件，且**未检测到任何引用** |
+| `move-needs-repoint` | 同上，但被快捷方式 / PATH / 注册表 / 服务 / 计划任务 / 配置文件引用，移动后需要改指向 |
+| `cannot-move` | 重解析点、云同步管理目录、被其它进程占用的文件 |
+
+判定按上表顺序进行，命中即止。每类给出：文件数、总体积、占比、原因分解、目录归并、体积最大的文件。只有显式加 `-WriteDetailCsv` 才会落完整明细。
+
+引用检测是**轻量版**：快捷方式、PATH、卸载/Run 注册表项、Shell 文件夹、环境变量、服务、计划任务、常见 IDE/项目配置文件。它不扫全量注册表，所以「未检测到引用」是证据，不是证明。
+
+可调整的参数：
+
+- `TempMinimumAgeDays`：临时/缓存文件的最小保留天数，默认 7 天；未超期的会被归到 `keep`。
+- `MoveMinimumBytes`：参与转移评估的最小体积，默认 256 MiB。
+- `MoveMinimumAgeDays`：参与转移评估的最小未修改天数，默认 30 天。
+- `TopExamples` / `TopRollupDirs`：每类展示的最大文件数与目录归并数，默认 10 / 15。
+- `RollupDepth`：目录归并的路径层级，默认 6。
+- `MaxScanSeconds`：最长扫描时间，默认 1800 秒。
+- `MaxConfigFiles`：引用检测读取配置文件的上限，默认 3000。
+- `SkipReferenceScan`：跳过引用检测（更快，但无法区分 `safe-move` 与 `move-needs-repoint`）。
+- `WriteDetailCsv`：额外输出 `classify-detail.csv` 完整明细。
+
+产物：`classify-summary.json`、`classify-report.md`（可选 `classify-detail.csv`）。
+
+**`safe-delete` 只是高置信度判定，不是保证。** 没有任何工具能证明删除某个文件"完全没有影响"。先把这 6 类当作有优先级的证据看，任何实际动作仍需逐项批准。
+
 ## 安全说明
 
 任何工具都无法证明任意文件被移动或删除后对所有软件“绝对没有影响”。本技能采用保守策略，只把有较强依据的内容列为候选，并要求逐项确认。完整判断规则见 [references/classification.md](references/classification.md)。
