@@ -8,6 +8,8 @@ foreach ($relative in $required) {
   if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) { throw "Missing required file: $relative" }
 }
 foreach ($script in Get-ChildItem -LiteralPath (Join-Path $root 'scripts') -Filter '*.ps1') {
+  $scriptText = [IO.File]::ReadAllText($script.FullName)
+  if ($scriptText -match '[^\x00-\x7F]') { throw "Non-ASCII text in $($script.Name) can be misdecoded by Windows PowerShell 5.1." }
   $tokens=$null; $errors=$null
   [void][Management.Automation.Language.Parser]::ParseFile($script.FullName,[ref]$tokens,[ref]$errors)
   if ($errors.Count) { throw "PowerShell syntax error in $($script.Name): $($errors[0].Message)" }
@@ -21,8 +23,14 @@ if (Test-Path -LiteralPath $ps51) {
   $audit = Join-Path $env:TEMP ('wdc-validate-' + [Guid]::NewGuid().ToString('N'))
   $testDrive = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($root))
   try {
-    & $ps51 -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\scan-drive.ps1') -DriveRoot $testDrive -OutputDirectory $audit -SkipUserContentScan | Out-Null
+    $summary = & $ps51 -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\scan-drive.ps1') -DriveRoot $testDrive -OutputDirectory $audit -SkipUserContentScan
     if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 scan smoke test failed.' }
+    $summaryText = $summary -join "`n"
+    foreach ($property in @('LimitReached','TimeLimitReached','OutputTruncated','EligibleCount')) {
+      if ($summaryText -notmatch [regex]::Escape($property)) { throw "Console summary is missing $property." }
+    }
+    $json = Get-Content -LiteralPath (Join-Path $audit 'drive-candidates.json') -Raw | ConvertFrom-Json
+    if ($null -eq $json.cloudRoots) { throw 'cloudRoots must be an array, including when no roots are detected.' }
     $csvHeader = Get-Content -LiteralPath (Join-Path $audit 'drive-candidates.csv') -TotalCount 1
     if ($csvHeader -ne '"id","action","path","bytes","lastWriteUtc","sha256","reason","risk"') { throw 'Empty CSV header test failed.' }
     $reportHeader = Get-Content -LiteralPath (Join-Path $audit 'drive-report.md') -TotalCount 1

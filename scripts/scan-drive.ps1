@@ -20,7 +20,7 @@ $items = [Collections.Generic.List[object]]::new()
 $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $deleteCounter = 0
 $moveCounter = 0
-$limitReached = $false
+$timeLimitReached = $false
 $timer = [Diagnostics.Stopwatch]::StartNew()
 $scanStopToken = '__WDC_SCAN_LIMIT__'
 
@@ -35,7 +35,7 @@ function Test-UnderRoot([string]$Path,[string]$Root) {
 }
 
 function Add-Candidate([IO.FileInfo]$File,[string]$Action,[string]$Reason) {
-  if ($items.Count -ge $MaxCandidates -or $timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:limitReached=$true; return }
+  if ($timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:timeLimitReached=$true; return }
   $blocked = [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::Offline -bor [IO.FileAttributes]::Encrypted -bor [IO.FileAttributes]::SparseFile
   if (($File.Attributes -band $blocked) -ne 0 -or -not (Test-Readable $File.FullName)) { return }
   if (-not $seen.Add($File.FullName)) { return }
@@ -47,8 +47,15 @@ function Add-Candidate([IO.FileInfo]$File,[string]$Action,[string]$Reason) {
     lastWriteUtc=$File.LastWriteTimeUtc.ToString('o'); sha256=$null; reason=$Reason
     risk=$risk
   })
-  if ($items.Count -ge $MaxCandidates) { $script:limitReached=$true }
 }
+
+$cloudRoots = @(
+  $env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial,
+  (Join-Path $env:USERPROFILE 'Dropbox'),(Join-Path $env:USERPROFILE 'Google Drive'),
+  (Join-Path $env:USERPROFILE 'GoogleDrive'),(Join-Path $env:USERPROFILE 'iCloudDrive'),
+  (Join-Path $env:USERPROFILE 'Box'),(Join-Path $env:USERPROFILE 'Nutstore'),
+  $AdditionalCloudRoot
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
 
 $tempRoots = @(
   (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'),
@@ -63,7 +70,7 @@ try {
 foreach ($root in $tempRoots) {
   $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
   Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($limitReached -or $timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:limitReached=$true; throw $scanStopToken }
+    if ($timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:timeLimitReached=$true; throw $scanStopToken }
     $candidateFull = [IO.Path]::GetFullPath($_.FullName)
     if ($candidateFull.StartsWith($rootFull,[StringComparison]::OrdinalIgnoreCase) -and $_.LastWriteTime -lt $tempCutoff) {
       Add-Candidate $_ 'delete-low-risk' ('Old disposable file under allowed root: ' + $root)
@@ -80,20 +87,13 @@ $knownFolders = [ordered]@{
   Pictures = [Environment]::GetFolderPath('MyPictures')
 }
 $allowedExt = @('.zip','.7z','.rar','.tar','.gz','.iso','.img','.mp4','.mkv','.mov','.avi','.webm','.mp3','.wav','.flac','.jpg','.jpeg','.png','.gif','.webp','.tif','.tiff','.pdf','.doc','.docx','.ppt','.pptx','.xls','.xlsx','.exe','.msi')
-$cloudRoots = @(
-  $env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial,
-  (Join-Path $env:USERPROFILE 'Dropbox'),(Join-Path $env:USERPROFILE 'Google Drive'),
-  (Join-Path $env:USERPROFILE 'GoogleDrive'),(Join-Path $env:USERPROFILE 'iCloudDrive'),
-  (Join-Path $env:USERPROFILE 'Box'),(Join-Path $env:USERPROFILE 'Nutstore'),
-  (Join-Path $env:USERPROFILE '坚果云'),$AdditionalCloudRoot
-) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
 $userCutoff = $now.AddDays(-$UserFileMinimumAgeDays)
-if (-not $SkipUserContentScan -and -not $limitReached) { foreach ($entry in $knownFolders.GetEnumerator()) {
+if (-not $SkipUserContentScan -and -not $timeLimitReached) { foreach ($entry in $knownFolders.GetEnumerator()) {
   $name = $entry.Key
   $root = $entry.Value
   if (-not (Test-Path -LiteralPath $root -PathType Container) -or [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($root)) -ne $driveFull) { continue }
   Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($limitReached -or $timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:limitReached=$true; throw $scanStopToken }
+    if ($timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:timeLimitReached=$true; throw $scanStopToken }
     $badAttributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Offline
     $inCloud=$false
     foreach($cloudRoot in $cloudRoots) { if (Test-UnderRoot $_.FullName $cloudRoot) { $inCloud=$true; break } }
@@ -103,10 +103,10 @@ if (-not $SkipUserContentScan -and -not $limitReached) { foreach ($entry in $kno
   }
 } }
 
-if (-not $SkipUserContentScan -and -not $limitReached -and $driveFull -ne 'C:\') {
+if (-not $SkipUserContentScan -and -not $timeLimitReached -and $driveFull -ne 'C:\') {
   $excludedPattern = '[\\/](Windows|Program Files|Program Files \(x86\)|ProgramData|Recovery|System Volume Information|\$Recycle\.Bin|AppData|node_modules|\.git)([\\/]|$)'
   Get-ChildItem -LiteralPath $driveFull -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($limitReached -or $timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:limitReached=$true; throw $scanStopToken }
+    if ($timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:timeLimitReached=$true; throw $scanStopToken }
     $badAttributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Offline
     $inCloud=$false
     foreach($cloudRoot in $cloudRoots) { if (Test-UnderRoot $_.FullName $cloudRoot) { $inCloud=$true; break } }
@@ -119,12 +119,15 @@ if (-not $SkipUserContentScan -and -not $limitReached -and $driveFull -ne 'C:\')
   if ($_.Exception.Message -ne $scanStopToken) { throw }
 }
 
-$sorted = @($items | Sort-Object action,@{Expression='bytes';Descending=$true})
+$eligibleCount = $items.Count
+$sorted = @($items | Sort-Object @{Expression='bytes';Descending=$true},action | Select-Object -First $MaxCandidates)
+$outputTruncated = $eligibleCount -gt $MaxCandidates
+$limitReached = $timeLimitReached -or $outputTruncated
 $jsonPath = Join-Path $outputFull 'drive-candidates.json'
 $csvPath = Join-Path $outputFull 'drive-candidates.csv'
 $mdPath = Join-Path $outputFull 'drive-report.md'
 $driveInfo = [IO.DriveInfo]::new($driveFull)
-[pscustomobject]@{schemaVersion=3;hashPolicy='deferred-until-approved-execution';targetRoot=$driveFull;scannedAtUtc=(Get-Date).ToUniversalTime().ToString('o');computer=$env:COMPUTERNAME;user=$env:USERNAME;freeBytesBefore=$driveInfo.AvailableFreeSpace;limitReached=$limitReached;maxCandidates=$MaxCandidates;maxScanSeconds=$MaxScanSeconds;cloudRoots=$cloudRoots;candidates=$sorted} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+[pscustomobject]@{schemaVersion=3;hashPolicy='deferred-until-approved-execution';targetRoot=$driveFull;scannedAtUtc=(Get-Date).ToUniversalTime().ToString('o');computer=$env:COMPUTERNAME;user=$env:USERNAME;freeBytesBefore=$driveInfo.AvailableFreeSpace;limitReached=$limitReached;timeLimitReached=$timeLimitReached;outputTruncated=$outputTruncated;eligibleCount=$eligibleCount;returnedCount=$sorted.Count;maxCandidates=$MaxCandidates;maxScanSeconds=$MaxScanSeconds;cloudRoots=@($cloudRoots);candidates=$sorted} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
 $csvColumns=@('id','action','path','bytes','lastWriteUtc','sha256','reason','risk')
 if ($sorted.Count) { $sorted | Select-Object $csvColumns | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8 }
 else { ('"'+($csvColumns -join '","')+'"') | Set-Content -LiteralPath $csvPath -Encoding UTF8 }
@@ -136,6 +139,7 @@ foreach($item in $sorted){
 $sum = ($sorted | Measure-Object bytes -Sum).Sum
 if ($null -eq $sum) { $sum = 0 }
 $lines += ''; $lines += ('Total candidates: {0}; potential bytes: {1}' -f $sorted.Count,$sum)
-if ($limitReached) { $lines += 'Scan limit reached; results are partial. Increase MaxCandidates or MaxScanSeconds for a deeper scan.' }
+if ($outputTruncated) { $lines += ('Output truncated after sorting by size: showing the largest {0} of {1} eligible candidates. Increase MaxCandidates to return more.' -f $sorted.Count,$eligibleCount) }
+if ($timeLimitReached) { $lines += 'Time limit reached; the filesystem scan is incomplete. Increase MaxScanSeconds for a deeper scan.' }
 $lines | Set-Content -LiteralPath $mdPath -Encoding UTF8
-[pscustomobject]@{Json=$jsonPath;Csv=$csvPath;Markdown=$mdPath;Count=$sorted.Count;PotentialBytes=$sum}
+[pscustomobject]@{Json=$jsonPath;Csv=$csvPath;Markdown=$mdPath;Count=$sorted.Count;EligibleCount=$eligibleCount;PotentialBytes=$sum;LimitReached=$limitReached;TimeLimitReached=$timeLimitReached;OutputTruncated=$outputTruncated;ScanSeconds=[Math]::Round($timer.Elapsed.TotalSeconds,2)}

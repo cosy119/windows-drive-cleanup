@@ -36,8 +36,7 @@ function Test-ApprovedClassification([IO.FileInfo]$File,[string]$Action,[string]
     $env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial,
     (Join-Path $env:USERPROFILE 'Dropbox'),(Join-Path $env:USERPROFILE 'Google Drive'),
     (Join-Path $env:USERPROFILE 'GoogleDrive'),(Join-Path $env:USERPROFILE 'iCloudDrive'),
-    (Join-Path $env:USERPROFILE 'Box'),(Join-Path $env:USERPROFILE 'Nutstore'),
-    (Join-Path $env:USERPROFILE '坚果云'),$data.cloudRoots
+    (Join-Path $env:USERPROFILE 'Box'),(Join-Path $env:USERPROFILE 'Nutstore'),$data.cloudRoots
   ) | Where-Object { $_ } | Select-Object -Unique
   foreach($root in $cloudRoots) { if (Test-UnderRoot $File.FullName $root) { return $false } }
   if ($TargetRoot -eq 'C:\') {
