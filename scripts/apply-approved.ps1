@@ -30,15 +30,23 @@ foreach($item in $approved){
     if ([IO.Path]::GetPathRoot($file.FullName) -ne $targetRoot) { throw 'File is outside the manifest target drive.' }
     if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Not a regular file.' }
     if ([long]$file.Length -ne [long]$item.bytes -or $file.LastWriteTimeUtc.ToString('o') -ne $item.lastWriteUtc) { throw 'File changed after scan.' }
-    if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne $item.sha256) { throw 'Hash changed after scan.' }
     if ($item.action -eq 'move-review') {
       $relative=$file.FullName.Substring($targetRoot.Length)
       $destination=Join-Path (Join-Path $moveFull ('drive-quarantine-'+$stamp)) $relative
       if (Test-Path -LiteralPath $destination) { throw 'Destination already exists.' }
       if ($Execute) {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
-        Move-Item -LiteralPath $file.FullName -Destination $destination
-        $status='moved'; $message='Moved to quarantine.'
+        $sourceHash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        Copy-Item -LiteralPath $file.FullName -Destination $destination
+        $copied=Get-Item -LiteralPath $destination -Force
+        $destinationHash=(Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+        $sourceHashAfter=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        if ([long]$copied.Length -ne [long]$file.Length -or $destinationHash -ne $sourceHash -or $sourceHashAfter -ne $sourceHash) {
+          Remove-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+          throw 'Copy verification failed; source was preserved.'
+        }
+        Remove-Item -LiteralPath $file.FullName -Force
+        $status='moved'; $message='Copied, SHA-256 verified, then removed from source.'
       }
     } elseif ($item.action -eq 'delete-low-risk') {
       if ($Execute) {

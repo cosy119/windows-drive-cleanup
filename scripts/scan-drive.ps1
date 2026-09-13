@@ -4,13 +4,14 @@ param(
   [string]$OutputDirectory = (Join-Path $PWD 'drive-audit'),
   [int]$TempMinimumAgeDays = 14,
   [int]$UserFileMinimumAgeDays = 30,
-  [long]$MoveMinimumBytes = 268435456
+  [long]$MoveMinimumBytes = 268435456,
+  [switch]$SkipUserContentScan
 )
 
 $ErrorActionPreference = 'Stop'
 $driveFull = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($DriveRoot))
 $outputFull = [IO.Path]::GetFullPath($OutputDirectory)
-New-Item -ItemType Directory -Force -LiteralPath $outputFull | Out-Null
+New-Item -ItemType Directory -Force -Path $outputFull | Out-Null
 $now = Get-Date
 $items = [Collections.Generic.List[object]]::new()
 $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -25,13 +26,12 @@ function Add-Candidate([IO.FileInfo]$File,[string]$Action,[string]$Reason) {
   $blocked = [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::Offline -bor [IO.FileAttributes]::Encrypted -bor [IO.FileAttributes]::SparseFile
   if (($File.Attributes -band $blocked) -ne 0 -or -not (Test-Readable $File.FullName)) { return }
   if (-not $seen.Add($File.FullName)) { return }
-  $hash = (Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash
   if ($Action -eq 'delete-low-risk') { $script:deleteCounter++; $id = 'D{0:D4}' -f $script:deleteCounter }
   else { $script:moveCounter++; $id = 'M{0:D4}' -f $script:moveCounter }
   $risk = if($Action -eq 'delete-low-risk'){'Low risk; temporary recovery or diagnostic data may be lost.'}else{'Review required; moving may break shortcuts or application references.'}
   $items.Add([pscustomobject]@{
     id=$id; action=$Action; path=$File.FullName; bytes=[long]$File.Length
-    lastWriteUtc=$File.LastWriteTimeUtc.ToString('o'); sha256=$hash; reason=$Reason
+    lastWriteUtc=$File.LastWriteTimeUtc.ToString('o'); sha256=$null; reason=$Reason
     risk=$risk
   })
 }
@@ -65,7 +65,7 @@ $knownFolders = [ordered]@{
 }
 $allowedExt = @('.zip','.7z','.rar','.tar','.gz','.iso','.img','.mp4','.mkv','.mov','.avi','.webm','.mp3','.wav','.flac','.jpg','.jpeg','.png','.gif','.webp','.tif','.tiff','.pdf','.doc','.docx','.ppt','.pptx','.xls','.xlsx','.exe','.msi')
 $userCutoff = $now.AddDays(-$UserFileMinimumAgeDays)
-foreach ($entry in $knownFolders.GetEnumerator()) {
+if (-not $SkipUserContentScan) { foreach ($entry in $knownFolders.GetEnumerator()) {
   $name = $entry.Key
   $root = $entry.Value
   if (-not (Test-Path -LiteralPath $root -PathType Container) -or [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($root)) -ne $driveFull) { continue }
@@ -75,9 +75,9 @@ foreach ($entry in $knownFolders.GetEnumerator()) {
       Add-Candidate $_ 'move-review' ('Large user file in ' + $name)
     }
   }
-}
+} }
 
-if ($driveFull -ne 'C:\') {
+if (-not $SkipUserContentScan -and $driveFull -ne 'C:\') {
   $excludedPattern = '[\\/](Windows|Program Files|Program Files \(x86\)|ProgramData|Recovery|System Volume Information|\$Recycle\.Bin|AppData|node_modules|\.git)([\\/]|$)'
   Get-ChildItem -LiteralPath $driveFull -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
     $badAttributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Offline
@@ -92,7 +92,7 @@ $jsonPath = Join-Path $outputFull 'drive-candidates.json'
 $csvPath = Join-Path $outputFull 'drive-candidates.csv'
 $mdPath = Join-Path $outputFull 'drive-report.md'
 $driveInfo = [IO.DriveInfo]::new($driveFull)
-[pscustomobject]@{schemaVersion=1;targetRoot=$driveFull;scannedAtUtc=(Get-Date).ToUniversalTime().ToString('o');computer=$env:COMPUTERNAME;user=$env:USERNAME;freeBytesBefore=$driveInfo.AvailableFreeSpace;candidates=$sorted} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+[pscustomobject]@{schemaVersion=2;hashPolicy='deferred-until-approved-execution';targetRoot=$driveFull;scannedAtUtc=(Get-Date).ToUniversalTime().ToString('o');computer=$env:COMPUTERNAME;user=$env:USERNAME;freeBytesBefore=$driveInfo.AvailableFreeSpace;candidates=$sorted} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
 $sorted | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
 $lines = @('# Windows drive audit: ' + $driveFull,'','Read-only scan. No files were moved or deleted.','','| ID | Action | MiB | Last modified UTC | Path | Reason |','|---|---|---:|---|---|---|')
 foreach($item in $sorted){
