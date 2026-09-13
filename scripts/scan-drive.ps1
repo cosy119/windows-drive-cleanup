@@ -2,12 +2,12 @@
 param(
   [ValidatePattern('^[A-Za-z]:\\?$')][string]$DriveRoot = 'C:\',
   [string]$OutputDirectory = (Join-Path $PWD 'drive-audit'),
-  [int]$TempMinimumAgeDays = 14,
-  [int]$UserFileMinimumAgeDays = 30,
-  [long]$MoveMinimumBytes = 268435456,
+  [int]$TempMinimumAgeDays = 0,
+  [int]$UserFileMinimumAgeDays = 0,
+  [long]$MoveMinimumBytes = 0,
   [switch]$SkipUserContentScan,
   [switch]$AllCandidates,
-  [ValidateRange(0,2147483647)][int]$MaxCandidates = 5000,
+  [ValidateRange(0,2147483647)][int]$MaxCandidates = 0,
   [ValidateRange(10,86400)][int]$MaxScanSeconds = 300,
   [string[]]$AdditionalCloudRoot = @(),
   [switch]$WriteReports

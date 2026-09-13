@@ -25,6 +25,14 @@ if ($scanText -notmatch '\[switch\]\$AllCandidates') {
   throw 'scan-drive.ps1 is missing the AllCandidates switch.'
 }
 if ($scanText -notmatch '\[switch\]\$WriteReports') { throw 'scan-drive.ps1 is missing the opt-in report switch.' }
+foreach ($default in @(
+  '\[int\]\$TempMinimumAgeDays\s*=\s*0',
+  '\[int\]\$UserFileMinimumAgeDays\s*=\s*0',
+  '\[long\]\$MoveMinimumBytes\s*=\s*0',
+  '\[ValidateRange\(0,2147483647\)\]\[int\]\$MaxCandidates\s*=\s*0'
+)) {
+  if ($scanText -notmatch $default) { throw "Unlimited scan default is missing: $default" }
+}
 $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (Test-Path -LiteralPath $ps51) {
   $audit = Join-Path $env:TEMP ('wdc-validate-' + [Guid]::NewGuid().ToString('N'))

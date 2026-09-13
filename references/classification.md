@@ -6,7 +6,7 @@ Location is evidence, not proof of zero impact. Use `low risk based on current e
 
 Only include regular, non-reparse files older than the configured threshold from recognized temporary or diagnostic roots that are located on the selected drive. On C:, these may include the current user's resolved temporary directory, `C:\Windows\Temp` when readable, current-user Windows Error Reporting archives/queues, and the current-user CrashDumps directory.
 
-Possible impact: loss of temporary recovery data, cached diagnostics, or unfinished-session artifacts. Normal scans exclude recent files. `-AllCandidates` includes recent files as `delete-review`, never as `delete-low-risk`. Always exclude open, inaccessible, system, encrypted, sparse, offline, and cloud-placeholder files, and any canonical path that escapes its allowed root.
+Possible impact: loss of temporary recovery data, cached diagnostics, or unfinished-session artifacts. The default scan includes recent files as `delete-review`, never as `delete-low-risk`. A positive `TempMinimumAgeDays` may be supplied to filter by age. Always exclude open, inaccessible, system, encrypted, sparse, offline, and cloud-placeholder files, and any canonical path that escapes its allowed root.
 
 ## Move-review
 
