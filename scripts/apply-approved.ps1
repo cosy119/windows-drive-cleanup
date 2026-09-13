@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory)][string]$Manifest,
-  [Parameter(Mandatory)][string[]]$Ids,
+  [string[]]$Ids,
+  [string[]]$GroupIds,
   [string]$MoveRoot,
   [switch]$Execute,
   [string]$ConfirmToken,
@@ -25,7 +26,7 @@ function Test-ApprovedClassification([IO.FileInfo]$File,[string]$Action,[string]
     (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\WER\ReportQueue'),
     (Join-Path $env:LOCALAPPDATA 'CrashDumps')
   ) | Where-Object { $_ -and [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($_)) -eq $TargetRoot } | Select-Object -Unique
-  if ($Action -eq 'delete-low-risk') {
+  if ($Action -in @('delete-low-risk','delete-review')) {
     foreach($root in $tempRoots) { if (Test-UnderRoot $File.FullName $root) { return $true } }
     return $false
   }
@@ -51,9 +52,12 @@ function Test-ApprovedClassification([IO.FileInfo]$File,[string]$Action,[string]
 $data=Get-Content -LiteralPath $Manifest -Raw | ConvertFrom-Json
 $targetRoot=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath([string]$data.targetRoot))
 $normalizedIds=@($Ids | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$normalizedGroups=@($GroupIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if (-not $normalizedIds.Count -and -not $normalizedGroups.Count) { throw 'Supply at least one item ID or source group number.' }
 if ($normalizedIds.Count -ne @($normalizedIds | Select-Object -Unique).Count) { throw 'Duplicate IDs were supplied.' }
-$approved=@($data.candidates | Where-Object { $normalizedIds -contains $_.id })
-if ($approved.Count -ne $normalizedIds.Count) { throw 'One or more IDs are absent or duplicated in the manifest.' }
+$approved=@($data.candidates | Where-Object { ($normalizedIds -contains $_.id) -or ($normalizedGroups -contains ([string]$_.groupId)) } | Sort-Object id -Unique)
+foreach ($id in $normalizedIds) { if (-not ($data.candidates | Where-Object id -eq $id)) { throw "Item ID is absent from the manifest: $id" } }
+foreach ($group in $normalizedGroups) { if (-not ($data.candidates | Where-Object { ([string]$_.groupId) -eq $group })) { throw "Source group is absent from the manifest: $group" } }
 if ($Execute -and $ConfirmToken -cne 'CONFIRM') { throw 'Execution requires -ConfirmToken CONFIRM.' }
 if ($approved.action -contains 'move-review' -and [string]::IsNullOrWhiteSpace($MoveRoot)) { throw 'MoveRoot is required for move-review items.' }
 if ($MoveRoot) {
@@ -72,7 +76,7 @@ foreach($item in $approved){
     if ($file.PSIsContainer -or ($file.Attributes -band $blocked) -ne 0) { throw 'Not an eligible regular file.' }
     if ([long]$file.Length -ne [long]$item.bytes -or $file.LastWriteTimeUtc.ToString('o') -ne $item.lastWriteUtc) { throw 'File changed after scan.' }
     if (-not (Test-ApprovedClassification $file ([string]$item.action) $targetRoot)) { throw 'Manifest classification is not valid for this path.' }
-    if (($item.action -eq 'delete-low-risk' -and $item.id -notmatch '^D\d+$') -or ($item.action -eq 'move-review' -and $item.id -notmatch '^M\d+$')) { throw 'Manifest ID does not match its action.' }
+    if (($item.action -like 'delete-*' -and $item.id -notmatch '^D\d+$') -or ($item.action -eq 'move-review' -and $item.id -notmatch '^M\d+$')) { throw 'Manifest ID does not match its action.' }
     if ($item.action -eq 'move-review') {
       $relative=$file.FullName.Substring($targetRoot.Length)
       $destination=Join-Path (Join-Path $moveFull ('drive-quarantine-'+$stamp)) $relative
@@ -90,7 +94,7 @@ foreach($item in $approved){
         $copyStarted=$false
         $status='moved'; $message='Copied, SHA-256 verified, then removed from source.'
       }
-    } elseif ($item.action -eq 'delete-low-risk') {
+    } elseif ($item.action -in @('delete-low-risk','delete-review')) {
       if ($Execute) {
         [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($file.FullName,'OnlyErrorDialogs','SendToRecycleBin')
         $status='recycled'; $message='Sent to Recycle Bin.'

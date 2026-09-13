@@ -12,10 +12,16 @@ Reduce usage on a selected local Windows drive without silently changing the sys
 1. Resolve the target from the conversation. Use `C:\` only when the user has not chosen another local drive. Repeat the resolved drive in the audit heading. Treat links, junctions, cloud placeholders, encrypted files, and files owned by another account as out of scope.
 2. Run `scripts/scan-drive.ps1 -DriveRoot <drive>` without elevation. Discovery must be read-only. Save its JSON, CSV, and Markdown reports in a user-writable directory. The scan records size and timestamp only; SHA-256 is deferred until the user approves an actual move.
 3. Read [references/classification.md](references/classification.md) before interpreting results. Supplement the script with read-only disk-usage checks when useful.
-4. Present candidates as `delete-low-risk`, `move-review`, or `excluded`. For every proposed item show manifest ID, full path, size, reason, last-write time, proposed action, destination, and risk. Do not count a file twice.
-5. Ask the user to approve exact manifest IDs and their actions. A request to clean C: authorizes scanning, not mutation. Silence or approval of one group does not approve another.
-6. Preview approved actions with `scripts/apply-approved.ps1`. Real execution additionally requires `-Execute -ConfirmToken CONFIRM`.
-7. Verify the results. Report successes, changed or skipped files, failures, recovered space, quarantine location, and restoration instructions. Do not stop processes or reboot to unlock files unless separately requested.
+4. Respond in chat. Do not give the user Markdown, CSV, JSON, or Word reports unless they explicitly ask for a file. The JSON manifest remains an internal execution input.
+5. Group results by `sourceGroup` and present simple group numbers `1`, `2`, `3`, and so on. Show path, file count, total size, assessment breakdown, and risk for each group. Let the user approve group numbers. Do not require internal `D0001` or `M0001` IDs unless they choose only part of a group.
+6. Classify every detected file along both dimensions below. Never call an outcome guaranteed or completely impact-free; use high-confidence wording and state residual uncertainty.
+   - Deletion: `high-confidence removable`, `confirm before deletion`, `cannot delete`.
+   - Transfer: `high-confidence transferable`, `manual confirmation required`, `transfer requires repointing`, `cannot transfer`.
+   Map old disposable files under narrowly allowed temp or diagnostic roots to high-confidence removal. Map recent temp files and regenerable caches to confirmation. Map protected, application, active, encrypted, sync-managed, and system content to cannot delete. Use reference-scan evidence to distinguish transferable, confirmation, repointing, and cannot-transfer results.
+7. List all detected files in chat under their numbered source groups. When the list is too large for one response, paginate it and clearly state the shown range and remaining count; continue in later messages instead of replacing the list with a document link.
+8. Ask the user to approve exact group numbers and actions. A request to clean C: authorizes scanning, not mutation. Silence or approval of one group does not approve another.
+9. Preview approved groups with `scripts/apply-approved.ps1 -GroupIds <numbers>`. Real execution additionally requires `-Execute -ConfirmToken CONFIRM`.
+10. Verify the results. Report successes, changed or skipped files, failures, recovered space, quarantine location, and restoration instructions. Do not stop processes or reboot to unlock files unless separately requested.
 
 ## Classification audit (read-only overview)
 
@@ -71,6 +77,12 @@ Preview exact approved IDs:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/apply-approved.ps1 -Manifest .\drive-audit\drive-candidates.json -Ids "D0001, M0003" -MoveRoot D:\Drive-quarantine
+```
+
+Preview approved source groups:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/apply-approved.ps1 -Manifest .\drive-audit\drive-candidates.json -GroupIds "1, 3" -MoveRoot D:\Drive-quarantine
 ```
 
 Execute after approval:

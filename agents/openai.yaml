@@ -1,6 +1,6 @@
 interface:
   display_name: "Windows 磁盘安全清理"
   short_description: "只读扫描指定磁盘，逐项确认后再移动或清理候选文件"
-  default_prompt: "使用 $windows-drive-cleanup 扫描我指定的磁盘，先给出候选清单，等我逐项确认后再处理。"
+  default_prompt: "使用 $windows-drive-cleanup 扫描我指定的磁盘，直接在聊天中按来源目录编号，并分别说明删除与转移判断，等我选择分组后再处理。"
 policy:
   allow_implicit_invocation: true

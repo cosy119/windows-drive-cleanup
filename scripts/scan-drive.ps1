@@ -9,10 +9,12 @@ param(
   [switch]$AllCandidates,
   [ValidateRange(0,2147483647)][int]$MaxCandidates = 5000,
   [ValidateRange(10,86400)][int]$MaxScanSeconds = 300,
-  [string[]]$AdditionalCloudRoot = @()
+  [string[]]$AdditionalCloudRoot = @(),
+  [switch]$WriteReports
 )
 
 $ErrorActionPreference = 'Stop'
+$assessmentTempMinimumAgeDays = $TempMinimumAgeDays
 if ($AllCandidates) {
   $TempMinimumAgeDays = 0
   $UserFileMinimumAgeDays = 0
@@ -42,16 +44,16 @@ function Test-UnderRoot([string]$Path,[string]$Root) {
   return $full.StartsWith($base,[StringComparison]::OrdinalIgnoreCase)
 }
 
-function Add-Candidate([IO.FileInfo]$File,[string]$Action,[string]$Reason) {
+function Add-Candidate([IO.FileInfo]$File,[string]$Action,[string]$Reason,[string]$SourceGroup) {
   if ($timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:timeLimitReached=$true; return }
   $blocked = [IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::Offline -bor [IO.FileAttributes]::Encrypted -bor [IO.FileAttributes]::SparseFile
   if (($File.Attributes -band $blocked) -ne 0 -or -not (Test-Readable $File.FullName)) { return }
   if ($retainedPaths.Contains($File.FullName)) { return }
   $script:eligibleCount++
   $script:candidateSequence++
-  $risk = if($Action -eq 'delete-low-risk'){'Low risk; temporary recovery or diagnostic data may be lost.'}else{'Review required; moving may break shortcuts or application references.'}
+  $risk = if($Action -eq 'delete-low-risk'){'Low risk; temporary recovery or diagnostic data may be lost.'}elseif($Action -eq 'delete-review'){'Review required; recent temporary data may still be needed by its owning application.'}else{'Review required; moving may break shortcuts or application references.'}
   $candidate = [pscustomobject]@{
-    action=$Action; path=$File.FullName; bytes=[long]$File.Length
+    action=$Action; sourceGroup=$SourceGroup; path=$File.FullName; bytes=[long]$File.Length
     lastWriteUtc=$File.LastWriteTimeUtc.ToString('o'); sha256=$null; reason=$Reason
     risk=$risk
   }
@@ -90,6 +92,7 @@ $tempRoots = @(
 ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) -and [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($_)) -eq $driveFull } | Select-Object -Unique
 
 $tempCutoff = $now.AddDays(-$TempMinimumAgeDays)
+$assessmentTempCutoff = $now.AddDays(-$assessmentTempMinimumAgeDays)
 try {
 foreach ($root in $tempRoots) {
   $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
@@ -97,7 +100,9 @@ foreach ($root in $tempRoots) {
     if ($timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:timeLimitReached=$true; throw $scanStopToken }
     $candidateFull = [IO.Path]::GetFullPath($_.FullName)
     if ($candidateFull.StartsWith($rootFull,[StringComparison]::OrdinalIgnoreCase) -and $_.LastWriteTime -lt $tempCutoff) {
-      Add-Candidate $_ 'delete-low-risk' ('Old disposable file under allowed root: ' + $root)
+      $deleteAction = if ($_.LastWriteTime -lt $assessmentTempCutoff) { 'delete-low-risk' } else { 'delete-review' }
+      $deleteReason = if ($deleteAction -eq 'delete-low-risk') { 'Old disposable file under allowed root: ' + $root } else { 'Recent temporary file; confirm the owning application is closed: ' + $root }
+      Add-Candidate $_ $deleteAction $deleteReason $root
     }
   }
 }
@@ -122,7 +127,7 @@ if (-not $SkipUserContentScan -and -not $timeLimitReached -and $driveFull -eq 'C
     $inCloud=$false
     foreach($cloudRoot in $cloudRoots) { if (Test-UnderRoot $_.FullName $cloudRoot) { $inCloud=$true; break } }
     if (-not $inCloud -and $_.Length -ge $MoveMinimumBytes -and $_.LastWriteTime -lt $userCutoff -and $allowedExt -contains $_.Extension.ToLowerInvariant() -and ($_.Attributes -band $badAttributes) -eq 0 -and $_.FullName -notmatch '[\\/]\.git[\\/]') {
-      Add-Candidate $_ 'move-review' ('Large user file in ' + $name)
+      Add-Candidate $_ 'move-review' ('User file in ' + $name) $root
     }
   }
 } }
@@ -137,7 +142,10 @@ if (-not $SkipUserContentScan -and -not $timeLimitReached -and $driveFull -ne 'C
     $inTemp=$false
     foreach($tempRoot in $tempRoots) { if (Test-UnderRoot $_.FullName $tempRoot) { $inTemp=$true; break } }
     if (-not $inCloud -and -not $inTemp -and $_.Length -ge $MoveMinimumBytes -and $_.LastWriteTime -lt $userCutoff -and $allowedExt -contains $_.Extension.ToLowerInvariant() -and ($_.Attributes -band $badAttributes) -eq 0 -and $_.FullName -notmatch $excludedPattern) {
-      Add-Candidate $_ 'move-review' 'Large user-content file on selected non-system drive'
+      $relative = $_.FullName.Substring($driveFull.Length).TrimStart('\')
+      $firstPart = @($relative -split '\\')[0]
+      $sourceGroup = if ($firstPart) { Join-Path $driveFull $firstPart } else { $driveFull }
+      Add-Candidate $_ 'move-review' 'User-content file on selected non-system drive' $sourceGroup
     }
   }
 }
@@ -150,29 +158,41 @@ $sorted = @($retained | Sort-Object @{Expression='bytes';Descending=$true},actio
 $deleteCounter = 0
 $moveCounter = 0
 foreach ($item in $sorted) {
-  if ($item.action -eq 'delete-low-risk') { $deleteCounter++; $id = 'D{0:D4}' -f $deleteCounter }
+  if ($item.action -like 'delete-*') { $deleteCounter++; $id = 'D{0:D4}' -f $deleteCounter }
   else { $moveCounter++; $id = 'M{0:D4}' -f $moveCounter }
   $item | Add-Member -NotePropertyName id -NotePropertyValue $id
 }
+$groupMap = @{}
+$groupNumber = 0
+foreach ($sourceGroup in @($sorted.sourceGroup | Sort-Object -Unique)) {
+  $groupNumber++
+  $groupMap[[string]$sourceGroup] = $groupNumber
+}
+foreach ($item in $sorted) { $item | Add-Member -NotePropertyName groupId -NotePropertyValue $groupMap[[string]$item.sourceGroup] }
 $outputTruncated = $MaxCandidates -gt 0 -and $eligibleCount -gt $MaxCandidates
 $limitReached = $timeLimitReached -or $outputTruncated
 $jsonPath = Join-Path $outputFull 'drive-candidates.json'
-$csvPath = Join-Path $outputFull 'drive-candidates.csv'
-$mdPath = Join-Path $outputFull 'drive-report.md'
+$csvPath = $null
+$mdPath = $null
 $driveInfo = [IO.DriveInfo]::new($driveFull)
 [pscustomobject]@{schemaVersion=3;hashPolicy='deferred-until-approved-execution';targetRoot=$driveFull;scannedAtUtc=(Get-Date).ToUniversalTime().ToString('o');computer=$env:COMPUTERNAME;user=$env:USERNAME;freeBytesBefore=$driveInfo.AvailableFreeSpace;allCandidates=[bool]$AllCandidates;tempMinimumAgeDays=$TempMinimumAgeDays;userFileMinimumAgeDays=$UserFileMinimumAgeDays;moveMinimumBytes=$MoveMinimumBytes;limitReached=$limitReached;timeLimitReached=$timeLimitReached;outputTruncated=$outputTruncated;eligibleCount=$eligibleCount;returnedCount=$sorted.Count;maxCandidates=$MaxCandidates;maxScanSeconds=$MaxScanSeconds;cloudRoots=@($cloudRoots);candidates=$sorted} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
-$csvColumns=@('id','action','path','bytes','lastWriteUtc','sha256','reason','risk')
-if ($sorted.Count) { $sorted | Select-Object $csvColumns | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8 }
-else { ('"'+($csvColumns -join '","')+'"') | Set-Content -LiteralPath $csvPath -Encoding UTF8 }
-$lines = @("# Windows drive audit: $driveFull",'','Read-only scan. No files were moved or deleted.','','| ID | Action | MiB | Last modified UTC | Path | Reason |','|---|---|---:|---|---|---|')
-foreach($item in $sorted){
-  $safePath=[Net.WebUtility]::HtmlEncode($item.path); $safeReason=$item.reason.Replace('|','\|')
-  $lines += ('| {0} | {1} | {2:N1} | {3} | <code>{4}</code> | {5} |' -f $item.id,$item.action,($item.bytes/1MB),$item.lastWriteUtc,$safePath,$safeReason)
-}
+$csvColumns=@('groupId','sourceGroup','id','action','path','bytes','lastWriteUtc','sha256','reason','risk')
 $sum = ($sorted | Measure-Object bytes -Sum).Sum
 if ($null -eq $sum) { $sum = 0 }
-$lines += ''; $lines += ('Total candidates: {0}; potential bytes: {1}' -f $sorted.Count,$sum)
-if ($outputTruncated) { $lines += ('Output truncated after sorting by size: showing the largest {0} of {1} eligible candidates. Increase MaxCandidates to return more.' -f $sorted.Count,$eligibleCount) }
-if ($timeLimitReached) { $lines += 'Time limit reached; the filesystem scan is incomplete. Increase MaxScanSeconds for a deeper scan.' }
-$lines | Set-Content -LiteralPath $mdPath -Encoding UTF8
+if ($WriteReports) {
+  $csvPath = Join-Path $outputFull 'drive-candidates.csv'
+  $mdPath = Join-Path $outputFull 'drive-report.md'
+  if ($sorted.Count) { $sorted | Select-Object $csvColumns | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8 }
+  else { ('"'+($csvColumns -join '","')+'"') | Set-Content -LiteralPath $csvPath -Encoding UTF8 }
+  $lines = New-Object 'System.Collections.Generic.List[string]'
+  foreach ($line in @("# Windows drive audit: $driveFull",'','Read-only scan. No files were moved or deleted.','','| Group | ID | Action | MiB | Last modified UTC | Path | Reason |','|---:|---|---|---:|---|---|---|')) { [void]$lines.Add($line) }
+  foreach($item in $sorted){
+    $safePath=[Net.WebUtility]::HtmlEncode($item.path); $safeReason=$item.reason.Replace('|','\|')
+    [void]$lines.Add(('| {0} | {1} | {2} | {3:N1} | {4} | <code>{5}</code> | {6} |' -f $item.groupId,$item.id,$item.action,($item.bytes/1MB),$item.lastWriteUtc,$safePath,$safeReason))
+  }
+  [void]$lines.Add(''); [void]$lines.Add(('Total candidates: {0}; potential bytes: {1}' -f $sorted.Count,$sum))
+  if ($outputTruncated) { [void]$lines.Add(('Output truncated after sorting by size: showing the largest {0} of {1} eligible candidates. Increase MaxCandidates to return more.' -f $sorted.Count,$eligibleCount)) }
+  if ($timeLimitReached) { [void]$lines.Add('Time limit reached; the filesystem scan is incomplete. Increase MaxScanSeconds for a deeper scan.') }
+  $lines | Set-Content -LiteralPath $mdPath -Encoding UTF8
+}
 [pscustomobject]@{Json=$jsonPath;Csv=$csvPath;Markdown=$mdPath;AllCandidates=[bool]$AllCandidates;Count=$sorted.Count;EligibleCount=$eligibleCount;PotentialBytes=$sum;LimitReached=$limitReached;TimeLimitReached=$timeLimitReached;OutputTruncated=$outputTruncated;ScanSeconds=[Math]::Round($timer.Elapsed.TotalSeconds,2)}

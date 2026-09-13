@@ -59,13 +59,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-skill.ps1 -Platform W
 使用 $windows-drive-cleanup 扫描 D 盘，找出可以移动的大文件。
 ```
 
-扫描完成后，Codex 会列出类似 `D0001`、`M0001` 的编号。检查路径和风险说明后，再明确批准：
+扫描完成后，Codex 会按来源目录列出 `1、2、3…` 分组号。检查分类、路径和风险说明后，直接批准分组：
 
 ```text
-同意把 M0001 和 M0003 移动到 E:\Drive-quarantine；同意将 D0002 放入回收站。
+同意处理第 1、3 组；移动内容放到 E:\Drive-quarantine。
 ```
 
-没有明确批准编号时，技能不应执行任何移动或删除操作。
+没有明确批准分组时，技能不应执行任何移动或删除操作。需要只处理组内部分文件时，才使用内部文件编号。
 
 ## 手动运行扫描脚本
 
@@ -95,11 +95,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\scan-drive.ps1 `
 - `MaxCandidates`：扫描过程中保留的最大候选数量，默认 5000，并始终保留体积最大的文件；设为 `0` 可返回全部候选，但会增加内存和报告体积。
 - `MaxScanSeconds`：最长扫描时间，默认 300 秒；超时表示磁盘尚未扫描完整，并会与输出数量截断分别标记。
 - `AdditionalCloudRoot`：补充自定义云同步根目录，可重复传入。
+- `WriteReports`：额外生成 Markdown 和 CSV；默认不生成，日常使用直接在聊天中查看分组结果。
 
-扫描会生成：
+扫描始终生成供执行器复核的内部 JSON 清单。只有指定 `-WriteReports` 时才额外生成：
 
-- `drive-report.md`：适合人工阅读的报告。
-- `drive-candidates.csv`：适合表格查看的清单。
+- `drive-report.md`：可选的人类可读报告。
+- `drive-candidates.csv`：可选的表格清单。
 - `drive-candidates.json`：执行脚本使用的不可随意修改的清单。
 
 ## 预览和执行
