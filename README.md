@@ -50,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-skill.ps1 -Platform W
 可以直接说：
 
 ```text
-使用 $windows-drive-cleanup 扫描 C 盘，先列出候选文件，不要移动或删除。
+使用 $windows-drive-cleanup 的 AllCandidates 模式扫描 C 盘，列出全部符合安全边界的候选文件，不要移动或删除。
 ```
 
 更换磁盘：
