@@ -52,8 +52,11 @@ function Add-Candidate([IO.FileInfo]$File,[string]$Action,[string]$Reason,[strin
   $script:eligibleCount++
   $script:candidateSequence++
   $risk = if($Action -eq 'delete-low-risk'){'Low risk; temporary recovery or diagnostic data may be lost.'}elseif($Action -eq 'delete-review'){'Review required; recent temporary data may still be needed by its owning application.'}else{'Review required; moving may break shortcuts or application references.'}
+  $deleteAssessment = if($Action -eq 'delete-low-risk'){'high-confidence removable'}elseif($Action -eq 'delete-review'){'confirm before deletion'}else{'confirm before deletion'}
+  $transferAssessment = if($Action -like 'delete-*'){'cannot transfer'}else{'manual confirmation required'}
   $candidate = [pscustomobject]@{
-    action=$Action; sourceGroup=$SourceGroup; path=$File.FullName; bytes=[long]$File.Length
+    action=$Action; deleteAssessment=$deleteAssessment; transferAssessment=$transferAssessment
+    sourceGroup=$SourceGroup; path=$File.FullName; bytes=[long]$File.Length
     lastWriteUtc=$File.LastWriteTimeUtc.ToString('o'); sha256=$null; reason=$Reason
     risk=$risk
   }
@@ -94,19 +97,6 @@ $tempRoots = @(
 $tempCutoff = $now.AddDays(-$TempMinimumAgeDays)
 $assessmentTempCutoff = $now.AddDays(-$assessmentTempMinimumAgeDays)
 try {
-foreach ($root in $tempRoots) {
-  $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
-  Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:timeLimitReached=$true; throw $scanStopToken }
-    $candidateFull = [IO.Path]::GetFullPath($_.FullName)
-    if ($candidateFull.StartsWith($rootFull,[StringComparison]::OrdinalIgnoreCase) -and $_.LastWriteTime -lt $tempCutoff) {
-      $deleteAction = if ($_.LastWriteTime -lt $assessmentTempCutoff) { 'delete-low-risk' } else { 'delete-review' }
-      $deleteReason = if ($deleteAction -eq 'delete-low-risk') { 'Old disposable file under allowed root: ' + $root } else { 'Recent temporary file; confirm the owning application is closed: ' + $root }
-      Add-Candidate $_ $deleteAction $deleteReason $root
-    }
-  }
-}
-
 $knownFolders = [ordered]@{
   Downloads = (Join-Path $env:USERPROFILE 'Downloads')
   Documents = [Environment]::GetFolderPath('MyDocuments')
@@ -149,6 +139,19 @@ if (-not $SkipUserContentScan -and -not $timeLimitReached -and $driveFull -ne 'C
     }
   }
 }
+
+foreach ($root in $tempRoots) {
+  $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
+  Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($timer.Elapsed.TotalSeconds -ge $MaxScanSeconds) { $script:timeLimitReached=$true; throw $scanStopToken }
+    $candidateFull = [IO.Path]::GetFullPath($_.FullName)
+    if ($candidateFull.StartsWith($rootFull,[StringComparison]::OrdinalIgnoreCase) -and $_.LastWriteTime -lt $tempCutoff) {
+      $deleteAction = if ($_.LastWriteTime -lt $assessmentTempCutoff) { 'delete-low-risk' } else { 'delete-review' }
+      $deleteReason = if ($deleteAction -eq 'delete-low-risk') { 'Old disposable file under allowed root: ' + $root } else { 'Recent temporary file; confirm the owning application is closed: ' + $root }
+      Add-Candidate $_ $deleteAction $deleteReason $root
+    }
+  }
+}
 } catch {
   if ($_.Exception.Message -ne $scanStopToken) { throw }
 }
@@ -176,7 +179,7 @@ $csvPath = $null
 $mdPath = $null
 $driveInfo = [IO.DriveInfo]::new($driveFull)
 [pscustomobject]@{schemaVersion=3;hashPolicy='deferred-until-approved-execution';targetRoot=$driveFull;scannedAtUtc=(Get-Date).ToUniversalTime().ToString('o');computer=$env:COMPUTERNAME;user=$env:USERNAME;freeBytesBefore=$driveInfo.AvailableFreeSpace;allCandidates=[bool]$AllCandidates;tempMinimumAgeDays=$TempMinimumAgeDays;userFileMinimumAgeDays=$UserFileMinimumAgeDays;moveMinimumBytes=$MoveMinimumBytes;limitReached=$limitReached;timeLimitReached=$timeLimitReached;outputTruncated=$outputTruncated;eligibleCount=$eligibleCount;returnedCount=$sorted.Count;maxCandidates=$MaxCandidates;maxScanSeconds=$MaxScanSeconds;cloudRoots=@($cloudRoots);candidates=$sorted} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
-$csvColumns=@('groupId','sourceGroup','id','action','path','bytes','lastWriteUtc','sha256','reason','risk')
+$csvColumns=@('groupId','sourceGroup','id','action','deleteAssessment','transferAssessment','path','bytes','lastWriteUtc','sha256','reason','risk')
 $sum = ($sorted | Measure-Object bytes -Sum).Sum
 if ($null -eq $sum) { $sum = 0 }
 if ($WriteReports) {

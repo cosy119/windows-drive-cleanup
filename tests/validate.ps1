@@ -39,7 +39,7 @@ if (Test-Path -LiteralPath $ps51) {
     $json = Get-Content -LiteralPath (Join-Path $audit 'drive-candidates.json') -Raw | ConvertFrom-Json
     if ($null -eq $json.cloudRoots) { throw 'cloudRoots must be an array, including when no roots are detected.' }
     $csvHeader = Get-Content -LiteralPath (Join-Path $audit 'drive-candidates.csv') -TotalCount 1
-    if ($csvHeader -ne '"groupId","sourceGroup","id","action","path","bytes","lastWriteUtc","sha256","reason","risk"') { throw 'Empty CSV header test failed.' }
+    if ($csvHeader -ne '"groupId","sourceGroup","id","action","deleteAssessment","transferAssessment","path","bytes","lastWriteUtc","sha256","reason","risk"') { throw 'Empty CSV header test failed.' }
     $reportHeader = Get-Content -LiteralPath (Join-Path $audit 'drive-report.md') -TotalCount 1
     if ($reportHeader -ne "# Windows drive audit: $testDrive") { throw 'Markdown report header test failed.' }
   } finally {
