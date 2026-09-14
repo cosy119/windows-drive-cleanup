@@ -14,6 +14,7 @@ Reduce usage on a selected local Windows drive without silently changing the sys
 3. Read [references/classification.md](references/classification.md) before interpreting results. Supplement the script with read-only disk-usage checks when useful.
 4. Respond in chat. Do not give the user Markdown, CSV, JSON, or Word reports unless they explicitly ask for a file. The JSON manifest remains an internal execution input.
 5. Group results by `sourceGroup` and present simple group numbers `1`, `2`, `3`, and so on. Show path, file count, total size, assessment breakdown, and risk for each group. Let the user approve group numbers. Do not require internal `D0001` or `M0001` IDs unless they choose only part of a group.
+   **Use the manifest's own `groupId` values as the group numbers you show, and keep them in that order.** The script assigns `groupId` by path, so re-sorting the groups for presentation (for example by size) silently renumbers them and makes "delete 1, 2, move 5, 6" mean something different to the user than it does to the executor. If you ever present a different order, re-state the mapping between your numbers and `groupId` in the same message, and confirm the numbers before executing.
 6. Classify every detected file along both dimensions below. Never call an outcome guaranteed or completely impact-free; use high-confidence wording and state residual uncertainty.
    - Deletion: `high-confidence removable`, `confirm before deletion`, `cannot delete`.
    - Transfer: `high-confidence transferable`, `manual confirmation required`, `transfer requires repointing`, `cannot transfer`.
@@ -23,7 +24,8 @@ Reduce usage on a selected local Windows drive without silently changing the sys
    When discussing an age threshold, show the exact cutoff date calculated from the scan timestamp and each relevant file's last-write time. Do not estimate a future eligibility date without doing the date arithmetic.
 8. Ask the user to approve exact group numbers and actions. A request to clean C: authorizes scanning, not mutation. Silence or approval of one group does not approve another.
 9. Preview approved groups with `scripts/apply-approved.ps1 -GroupIds <numbers>`. Real execution additionally requires `-Execute -ConfirmToken CONFIRM`.
-10. Verify the results. Report successes, changed or skipped files, failures, recovered space, quarantine location, and restoration instructions. Do not stop processes or reboot to unlock files unless separately requested.
+10. Before a bulk execution on a host whose behaviour you have not already proven in this session, run `scripts/probe-recycle.ps1`. It creates its own scratch file inside a temp root, exercises the Send-to-Recycle-Bin path, and reports whether recycling works and whether the host misreports it. Record the verdict before approving a large batch.
+11. Verify the results by observation, not by exit status or exception text. Re-read the source paths and the destinations yourself, then report successes, changed or skipped files, failures, recovered space, quarantine location, and restoration instructions. Note that a recycled file frees no space until the Recycle Bin is emptied. Do not stop processes or reboot to unlock files unless separately requested.
 
 ## Classification audit (read-only overview)
 
@@ -53,6 +55,8 @@ Reference detection is deliberately lightweight: shortcuts, PATH, uninstall/Run 
 - Preserve any file changed after scanning. The executor verifies size and timestamp before acting. For a move, it copies the approved file, verifies source and destination SHA-256 values, and removes the source only after verification succeeds.
 - Move approved files into a uniquely named quarantine folder on a different volume, preserve their relative paths, write a restoration map, and never overwrite. Moving is implemented as verified copy followed by permanent removal of the source path; the source removal does not use the Recycle Bin.
 - Send approved deletions to the Recycle Bin. Permanent deletion requires a separate, explicit request after exact-file review.
+- Never treat an exception as proof that nothing happened, and never treat a quiet return as proof that something did. Hosts and sandboxes exist where the Recycle Bin call raises `Unable to find the specified file` while the file is in fact recycled. Judge every destructive action by re-reading the source path afterwards; `apply-approved.ps1` reports `recycled` only when the path is actually gone. When a run reports skipped items, re-check those paths before retrying, or you will act twice on the same file.
+- A file sent to the Recycle Bin still occupies its space. Say so when reporting recovered space: only emptying the Recycle Bin reclaims it.
 - Finish the non-admin audit before considering elevation. Never elevate merely to produce more candidates.
 
 ## Commands
@@ -91,4 +95,10 @@ Execute after approval:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/apply-approved.ps1 -Manifest .\drive-audit\drive-candidates.json -Ids "D0001, M0003" -MoveRoot D:\Drive-quarantine -Execute -ConfirmToken CONFIRM
+```
+
+Probe the Recycle Bin path before a bulk run (read the JSON it writes, not just the console):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/probe-recycle.ps1
 ```

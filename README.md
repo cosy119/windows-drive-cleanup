@@ -59,7 +59,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-skill.ps1 -Platform W
 使用 $windows-drive-cleanup 扫描 D 盘，找出可以移动的大文件。
 ```
 
-扫描完成后，Codex 会按来源目录列出 `1、2、3…` 分组号。检查分类、路径和风险说明后，直接批准分组：
+扫描完成后，Codex 会按来源目录列出 `1、2、3…` 分组号。**这些编号就是清单内部 `groupId` 本身，顺序与脚本分配一致**；如果汇报换了顺序（例如按体积重排），必须同时给出编号映射表。检查分类、路径和风险说明后，直接批准分组：
 
 ```text
 同意处理第 1、3 组；移动内容放到 E:\Drive-quarantine。
@@ -126,6 +126,28 @@ powershell -ExecutionPolicy Bypass -File .\scripts\apply-approved.ps1 `
 ```
 
 `move-review` 文件会保留原目录结构并移动到隔离目录。程序先复制文件并校验源文件和目标文件的 SHA-256，校验成功后使用 `Remove-Item` 永久移除原路径；这一步不进入回收站，但隔离目录保留已校验副本。`delete-low-risk` 文件会进入回收站。每次预览或执行都会在清单目录生成名称唯一的 `drive-operation-*.json`，可以根据 `path` 和 `destination` 字段核对或手动恢复文件。
+
+执行结束后会输出一行摘要 `Summary: approved=… completed=… skipped=…`，并以**实际观察到的结果**为准：只有当源路径确实消失时，`delete-*` 才会被标记为 `recycled`。
+
+从回收站里回来并不等于腾出空间——回收站里的文件仍占磁盘，需要清空回收站才真正释放；汇报"释放了多少"时要说清这一点。
+
+## 宿主差异：回收站 API 可能"假报错"
+
+在部分宿主环境（受限的沙箱会话、非交互式 shell、某些终端管控代理）里，`[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(..., 'SendToRecycleBin')` 会**抛出错误但操作其实已经成功**，典型报错是 `Unable to find the specified file`。凡是用异常判断成败的脚本，都会把已回收的文件误报为失败。
+
+因此本技能的做法是**只认观察结果**：调用之后用 `Test-Path` 复查源路径，路径消失才算成功，函数报错与否只写进 `message` 里供参考。批处理前可以先自证一次：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\probe-recycle.ps1
+```
+
+该脚本会在临时目录里自建一个探针文件，走一遍回收站流程并输出 JSON 报告：
+
+- `spurious-error`：接口报错但文件确实已回收 → 可以正常批处理，但一切以路径复查为准。
+- `clean`：接口正常无报错。
+- `not-removable`：探针文件没被删掉 → 此环境无法送回收站，需要单独确认后才能考虑其他方式。
+
+**看到 `skipped` 不要直接重跑。** 先复查那些路径是否已经不在了，否则会对同一批文件重复执行。
 
 ## 全盘分类盘点（只读）
 

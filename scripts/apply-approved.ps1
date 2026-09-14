@@ -96,8 +96,21 @@ foreach($item in $approved){
       }
     } elseif ($item.action -in @('delete-low-risk','delete-review')) {
       if ($Execute) {
-        [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($file.FullName,'OnlyErrorDialogs','SendToRecycleBin')
-        $status='recycled'; $message='Sent to Recycle Bin.'
+        # Some hosts raise a spurious error from the Recycle Bin shell API even though the item
+        # was recycled successfully (observed message: "Unable to find the specified file").
+        # Never judge the outcome by the exception: confirm it by observing the source path.
+        $recycleError=$null
+        try {
+          [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($file.FullName,'OnlyErrorDialogs','SendToRecycleBin')
+        } catch {
+          $recycleError=$_.Exception.Message
+        }
+        if (Test-Path -LiteralPath $file.FullName) {
+          throw ('Recycle Bin removal did not take effect. ' + $recycleError)
+        }
+        $status='recycled'
+        if ($recycleError) { $message='Sent to Recycle Bin; the host reported an error but the source path is gone, so the item was recycled.' }
+        else { $message='Sent to Recycle Bin.' }
       }
     } else { throw 'Unsupported manifest action.' }
   } catch {
@@ -107,6 +120,12 @@ foreach($item in $approved){
   $results.Add([pscustomobject]@{id=$item.id;path=$item.path;action=$item.action;status=$status;destination=$destination;message=$message;bytes=$item.bytes})
 }
 $results | Format-Table -AutoSize
+$doneCount=@($results | Where-Object { $_.status -in @('recycled','moved') }).Count
+$skipCount=@($results | Where-Object { $_.status -eq 'skipped' }).Count
+Write-Output ('Summary: approved={0} completed={1} skipped={2}' -f $results.Count,$doneCount,$skipCount)
+if ($skipCount -gt 0) {
+  Write-Output 'Skipped items were left untouched. Read each message before retrying; re-check the path first, because a spurious host error can hide a completed action.'
+}
 if ([string]::IsNullOrWhiteSpace($ResultPath)) { $ResultPath=Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($Manifest))) ('drive-operation-'+$stamp+'.json') }
 $resultFull=[IO.Path]::GetFullPath($ResultPath)
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $resultFull) | Out-Null

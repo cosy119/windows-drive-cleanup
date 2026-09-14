@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$required = @('SKILL.md','agents\openai.yaml','references\classification.md','scripts\scan-drive.ps1','scripts\apply-approved.ps1','scripts\install-skill.ps1','scripts\classify-drive.ps1')
+$required = @('SKILL.md','agents\openai.yaml','references\classification.md','scripts\scan-drive.ps1','scripts\apply-approved.ps1','scripts\install-skill.ps1','scripts\classify-drive.ps1','scripts\probe-recycle.ps1')
 foreach ($relative in $required) {
   if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) { throw "Missing required file: $relative" }
 }
@@ -85,6 +85,41 @@ try {
   if ($check.status -ne 'skipped' -or $check.message -notmatch 'classification') { throw 'Tampered-manifest test failed.' }
 } finally {
   if (Test-Path -LiteralPath $tamperDir) { Remove-Item -LiteralPath $tamperDir -Recurse -Force }
+}
+# Regression test: a real approved deletion must report 'recycled', because some hosts raise a
+# spurious error from the Recycle Bin API while still recycling the file. The executor must
+# judge the outcome by observing the source path. The only file touched here is one this test
+# creates itself, inside the current user's temp root.
+$tempRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'
+$recycleDir = Join-Path $tempRoot ('wdc-recycle-test-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $recycleDir | Out-Null
+try {
+  $probePath = Join-Path $recycleDir 'scratch.bin'
+  [IO.File]::WriteAllBytes($probePath, [byte[]](1..128))
+  $probeItem = Get-Item -LiteralPath $probePath
+  $manifest2 = Join-Path $recycleDir 'manifest.json'
+  $result2 = Join-Path $recycleDir 'result.json'
+  [pscustomobject]@{
+    schemaVersion = 3
+    targetRoot = [IO.Path]::GetPathRoot($probeItem.FullName)
+    cloudRoots = @()
+    candidates = @([pscustomobject]@{
+      groupId = 1
+      sourceGroup = $recycleDir
+      id = 'D0001'
+      action = 'delete-low-risk'
+      path = $probeItem.FullName
+      bytes = [long]$probeItem.Length
+      lastWriteUtc = $probeItem.LastWriteTimeUtc.ToString('o')
+    })
+  } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifest2 -Encoding UTF8
+  & $ps51 -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\apply-approved.ps1') -Manifest $manifest2 -GroupIds 1 -Execute -ConfirmToken CONFIRM -ResultPath $result2 | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Recycle status test failed: executor exited non-zero.' }
+  $check2 = Get-Content -LiteralPath $result2 -Raw | ConvertFrom-Json
+  if ($check2.status -ne 'recycled') { throw "Recycle status test failed: status=$($check2.status) message=$($check2.message)" }
+  if (Test-Path -LiteralPath $probeItem.FullName) { throw 'Recycle status test failed: the approved file is still present after a reported recycle.' }
+} finally {
+  if (Test-Path -LiteralPath $recycleDir) { Remove-Item -LiteralPath $recycleDir -Recurse -Force }
 }
 $skill = Get-Content -LiteralPath (Join-Path $root 'SKILL.md') -Raw
 if ($skill -notmatch '(?s)^---\s+name: windows-drive-cleanup\s+description:') { throw 'Invalid SKILL.md frontmatter.' }
